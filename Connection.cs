@@ -11,9 +11,10 @@ namespace AdHocRevolutionGlamour
     public class Connection
     {
         public string schema;
+        public string schema_info;
         public string azienda;
+        public SqlConnection connection;
 
-        SqlConnection connection;
         Dictionary<string, string> colori;
         Dictionary<string, string> numerate;
         List<string> taglie;
@@ -30,16 +31,18 @@ namespace AdHocRevolutionGlamour
             { "4", "UPC A" }
         };
 
-        public Connection(string connetionString, string schema, string azienda)
+        public Connection(string connetionString, string schema, string schema_info, string azienda)
         {
             this.schema = schema;
+            this.schema_info = schema_info;
             this.azienda = azienda;
             connection = new SqlConnection(connetionString);
         }
 
-        public Connection(SqlConnection connection, string schema, string azienda)
+        public Connection(SqlConnection connection, string schema, string schema_info, string azienda)
         {
             this.schema = schema;
+            this.schema_info = schema_info;
             this.azienda = azienda;
             this.connection = connection;
         }
@@ -191,7 +194,10 @@ namespace AdHocRevolutionGlamour
             codici.Columns.Add("CodiceGruppoMerceologico");
             codici.Columns.Add("CodiceCategoriaOmogenea");
             codici.Columns.Add("CodiceFornitore");
-            
+            codici.Columns.Add("NomenclaturaCombinata");
+            codici.Columns.Add("FuoriProduzione");
+            codici.Columns.Add("CodiceFamiglia");
+
             string query = "SELECT " +
                 "" + azienda + "KEY_ARTI.CACODICE AS Barcode, " +
                 "" + azienda + "ART_ICOL.ARCODART AS CodiceArticolo, " +
@@ -209,6 +215,8 @@ namespace AdHocRevolutionGlamour
                 "" + azienda + "ART_ICOL.ARGRUMER AS CodiceGruppoMerceologico, " +
                 "" + azienda + "ART_ICOL.ARCATOMO AS CodiceCategoriaOmogenea, " +
                 "" + azienda + "TCSCHMAS.STCODFOR AS CodiceFornitore, " +
+                "" + azienda + "TCSCHMAS.STNOMENC AS NomenclaturaCombinata, " +
+                "" + azienda + "TCSCHMAS.STCODFAM AS CodiceFamiglia, " +                
                 "" + azienda + "KEY_ARTI.CATIPBAR AS CodificaBarcode, " +
                 "" + azienda + "KEY_ARTI.CATIPCON AS TipoBarcode " +
                 "FROM [" + schema + "].[dbo].[" + azienda + "KEY_ARTI] " +
@@ -243,21 +251,21 @@ namespace AdHocRevolutionGlamour
                 query += " AND CATIPBAR = '" + codificaBarcode + "'";
             }
 
-            Open();
             SqlCommand command = new SqlCommand(query, connection);
             using (SqlDataReader reader = command.ExecuteReader())
             {
                 while (reader.Read())
                 {
+                    string CodiceArticolo = reader["CodiceArticolo"].ToString().Trim();
                     string CodiceNumerata = reader["CodiceNumerata"].ToString().Trim();
                     string CodiceTaglia = reader["CodiceTaglia"].ToString().Trim();
                     string CodiceColore = reader["CodiceColore"].ToString().Trim();
                     if (CodiceNumerata == "TU" && CodiceTaglia == "TU")
                         continue;
+                    ArticoloInfo articoloInfo = GetArticoloInfo(CodiceArticolo, CodiceColore, CodiceTaglia);
                     List<string> Taglie = GetTaglie(CodiceNumerata);
                     string IndiceTaglia = (Taglie.IndexOf(CodiceTaglia) + 1).ToString().PadLeft(2, '0');
                     var row = codici.NewRow();
-                    string CodiceArticolo = reader["CodiceArticolo"].ToString().Trim();
                     row["Barcode"] = reader["Barcode"].ToString().Trim();
                     row["CodiceArticolo"] = CodiceArticolo;
                     row["DescrizioneArticolo"] = reader["DescrizioneArticolo"].ToString().Trim();
@@ -275,17 +283,43 @@ namespace AdHocRevolutionGlamour
                     row["CodiceMarca"] = reader["CodiceMarca"].ToString().Trim();
                     row["CodiceStagione"] = reader["CodiceStagione"].ToString().Trim();
                     row["CodiceGenere"] = reader["CodiceGenere"].ToString().Trim();
-                    row["CodiceFornitore"] = reader["CodiceFornitore"].ToString().Trim();
                     row["CodiceGruppoMerceologico"] = reader["CodiceGruppoMerceologico"].ToString().Trim();
                     row["CodiceCategoriaOmogenea"] = reader["CodiceCategoriaOmogenea"].ToString().Trim();
                     row["CodiceFornitore"] = reader["CodiceFornitore"].ToString().Trim();
+                    row["NomenclaturaCombinata"] = reader["CodiceFornitore"].ToString().Trim();
+                    row["FuoriProduzione"] = articoloInfo.FuoriProduzione ? "Si" : "No";
+                    row["CodiceFamiglia"] = reader["CodiceFamiglia"].ToString().Trim();
                     codici.Rows.Add(row);
                 }
                 reader.Close();
             }
             command.Dispose();
-            Close();
             return codici;
+        }
+
+        public ArticoloInfo GetArticoloInfo (string CodiceArticolo, string CodiceColore, string CodiceTaglia)
+        {
+            ArticoloInfo articolo = new ArticoloInfo();
+            var query = "SELECT * FROM [" + schema_info + "].[dbo].[ARTICOLI] WHERE " +
+                "CodiceArticolo = @CodiceArticolo AND " +
+                "CodiceColore = @CodiceColore AND " +
+                "CodiceTaglia = @CodiceTaglia";
+            SqlCommand command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("CodiceArticolo", CodiceArticolo);
+            command.Parameters.AddWithValue("CodiceColore", CodiceColore);
+            command.Parameters.AddWithValue("CodiceTaglia", CodiceTaglia);
+            SqlDataReader reader = command.ExecuteReader();
+            articolo.CodiceArticolo = CodiceArticolo;
+            articolo.CodiceColore = CodiceColore;
+            articolo.CodiceTaglia = CodiceTaglia;
+            articolo.FuoriProduzione = false;
+            articolo.Numerata = "";
+            if (reader.Read())
+            {
+                articolo.Numerata = reader["Numerata"].ToString().Trim();
+                articolo.FuoriProduzione = (bool)reader["FuoriProduzione"];
+            }
+            return articolo;
         }
 
         public string GetPrezzo(string CodiceArticolo, string Listino)
@@ -553,7 +587,6 @@ namespace AdHocRevolutionGlamour
 
         public Articolo FromBarcode(string Barcode)
         {
-            Open();
             Articolo articolo = null;
             var query = "SELECT " +
                 "" + azienda + "KEY_ARTI.CACODICE AS Barcode, " +
@@ -604,15 +637,35 @@ namespace AdHocRevolutionGlamour
                 articolo.CodiceGenere = reader["CodiceGenere"].ToString().Trim();
                 articolo.CodiceGruppoMerceologico = reader["CodiceGruppoMerceologico"].ToString().Trim();
                 articolo.CodiceCategoriaOmogenea = reader["CodiceCategoriaOmogenea"].ToString().Trim();
-
+                articolo.Info = GetArticoloInfo(articolo.CodiceArticolo, articolo.CodiceColore, articolo.CodiceTaglia);
+                articolo.FuoriProduzione = articolo.Info.FuoriProduzione ? "Si" : "No";
                 List<string> Taglie = GetTaglie(articolo.CodiceNumerata);
                 string IndiceTaglia = (Taglie.IndexOf(articolo.CodiceTaglia) + 1).ToString().PadLeft(2, '0');
                 articolo.Quantita = GetQuantita(articolo.CodiceArticolo, articolo.CodiceColore, IndiceTaglia).ToString();
             }
             reader.Close();
             command.Dispose();
-            Close();
             return articolo;
+        }
+
+        public bool CheckExists(string table, string[] fields, string[] values, string schema)
+        {
+            List<string> where = new List<string>();
+            foreach (var field in fields)
+            {
+                where.Add(field + " = @" + field);
+            }
+            var query = "SELECT * FROM [" + schema + "].[dbo].[" + table + "] WHERE " + string.Join(" AND ", where);
+            SqlCommand command = new SqlCommand(query, connection);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                command.Parameters.Add(new SqlParameter(fields[i], values[i]));
+            }
+            SqlDataReader reader = command.ExecuteReader();
+            bool exists = reader.HasRows;
+            reader.Close();
+            command.Dispose();
+            return exists;
         }
     }
 }

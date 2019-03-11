@@ -29,5 +29,7 @@
         public string DescrizioneGruppoMerceologico;
         public string CodiceCategoriaOmogenea;
         public string DescrizioneCategoriaOmogenea;
+        public string FuoriProduzione;
+        public ArticoloInfo Info;
     }
 }
